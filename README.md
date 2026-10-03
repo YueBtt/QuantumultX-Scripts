@@ -4,9 +4,9 @@
 
 ---
 
-## 🪙 EZCompleteUI 自动领币脚本 (`ezcomplete_daily.js`)
+## 🪙 EZCompleteUI 3账号矩阵自动领币脚本 (`ezcomplete_daily.js`)
 
-每 4 小时自动向 Supabase 发起领币请求（每次 +10 币，每天全自动白嫖 60 币），自带 Token 过期检测、自动刷新与账号密码静默重登自愈机制。
+每 4 小时全自动并发为【主号 + 小号1 + 小号2】3 个账号矩阵向 Supabase 发起领币请求（每次 +10 币/号，每天全自动白嫖 180 币），合并为一条总结通知弹窗，自带 Token 过期检测、自动刷新与账号密码静默重登自愈机制。
 
 ### 📌 QX 配置方式
 
@@ -15,12 +15,7 @@
 ```ini
 [task_local]
 # 每 4 小时第 5 分钟自动执行一次
-5 0,4,8,12,16,20 * * * https://raw.githubusercontent.com/YueBtt/QuantumultX-Scripts/main/ezcomplete_daily.js, tag=EZCompleteUI自动领币, img-url=https://raw.githubusercontent.com/crossutility/Quantumult-X/master/quantumult-x.png, enabled=true
-
-[rewrite_local]
-# 自动抓取 Token 重写规则
-^https:\/\/spuoimtqofhbdzosrbng\.supabase\.co\/(functions\/v1\/|auth\/v1\/) url script-request-header https://raw.githubusercontent.com/YueBtt/QuantumultX-Scripts/main/ezcomplete_daily.js
-^https:\/\/spuoimtqofhbdzosrbng\.supabase\.co\/auth\/v1\/token url script-response-body https://raw.githubusercontent.com/YueBtt/QuantumultX-Scripts/main/ezcomplete_daily.js
+5 0,4,8,12,16,20 * * * https://raw.githubusercontent.com/YueBtt/QuantumultX-Scripts/main/ezcomplete_daily.js, tag=EZCompleteUI多账号领币, img-url=https://raw.githubusercontent.com/crossutility/Quantumult-X/master/quantumult-x.png, enabled=true
 
 [mitm]
 hostname = spuoimtqofhbdzosrbng.supabase.co
