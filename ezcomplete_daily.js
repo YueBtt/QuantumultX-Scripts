@@ -218,7 +218,13 @@ if (isRequest || isResponse) {
         if (pending <= 0) {
             const summary = results.join("\n");
             console.log("[EZCompleteUI 多账号领币汇报]\n" + summary);
-            $notify("EZCompleteUI 账号矩阵领币", "3账号自动轮询完成", summary);
+            // 只有在【真正成功领到币（包含 +币）】或者【彻底报错失败】时才弹窗！
+            // 如果全部账号都在正常冷却中，只静默记入日志，绝不弹窗骚扰你！
+            const hasSuccess = results.some(r => r.includes("+") && r.includes("币"));
+            const hasRealError = results.some(r => r.includes("失败") || r.includes("HTTP"));
+            if (hasSuccess || hasRealError) {
+                $notify("EZCompleteUI 账号矩阵领币", hasSuccess ? "💰 领币到账汇报" : "⚠️ 领币异常提示", summary);
+            }
             $done();
         }
     }
