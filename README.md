@@ -20,3 +20,11 @@
 [mitm]
 hostname = spuoimtqofhbdzosrbng.supabase.co
 ```
+
+### 🔒 凭据配置说明（安全脱敏）
+
+本脚本公网代码不包含任何明文账号密码，需在 QX 本地持久化存储中注入变量：
+- `ez_acc1_email`、`ez_acc1_pwd`（主号）
+- `ez_acc2_email`、`ez_acc2_pwd`（小号1，可选）
+- `ez_acc3_email`、`ez_acc3_pwd`（小号2，可选）
+未配置的账号槽位将自动静默跳过，绝不泄露个人隐私！
