@@ -103,12 +103,16 @@ function loginWithPassword(callback) {
     }
     console.log("[EZCompleteUI] 正在使用账号密码静默向 Supabase 登录换票...");
     const loginUrl = `${SUPABASE_URL}/auth/v1/token?grant_type=password`;
+    const fakeIp = getRandomIP();
     const opts = {
         url: loginUrl,
         method: "POST",
         headers: {
             "apikey": ANON_KEY,
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "User-Agent": "EZCompleteUI/7.1.4 (iPhone; iOS 16.0; Scale/3.00)",
+            "X-Forwarded-For": fakeIp,
+            "X-Real-IP": fakeIp
         },
         body: JSON.stringify({ email: email, password: password })
     };
@@ -189,9 +193,16 @@ function renewToken(refreshToken, callback) {
     );
 }
 
+function getRandomIP() {
+    const prefixes = [104, 172, 198, 23, 45, 66, 114, 223];
+    const p = prefixes[Math.floor(Math.random() * prefixes.length)];
+    return `${p}.${Math.floor(Math.random() * 240 + 10)}.${Math.floor(Math.random() * 240 + 10)}.${Math.floor(Math.random() * 240 + 10)}`;
+}
+
 function claimDailyCoins(userToken, isRetry) {
     console.log("[EZCompleteUI] 开始执行领币请求...");
     const claimUrl = `${SUPABASE_URL}/functions/v1/claim-daily-coins`;
+    const fakeIp = getRandomIP();
     const options = {
         url: claimUrl,
         method: "POST",
@@ -199,7 +210,10 @@ function claimDailyCoins(userToken, isRetry) {
             "apikey": ANON_KEY,
             "Authorization": `Bearer ${userToken}`,
             "Content-Type": "application/json",
-            "User-Agent": "EZCompleteUI/7.1.4 (iPhone; iOS 16.0; Scale/3.00)"
+            "User-Agent": "EZCompleteUI/7.1.4 (iPhone; iOS 16.0; Scale/3.00)",
+            "X-Forwarded-For": fakeIp,
+            "X-Real-IP": fakeIp,
+            "Client-IP": fakeIp
         },
         body: "{}"
     };
