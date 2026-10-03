@@ -1,9 +1,7 @@
 # EZCompleteUI 专属重写规则与 MITM 配置
 # 仓库：YueBtt/QuantumultX-Scripts
 
-[rewrite_local]
 ^https:\/\/spuoimtqofhbdzosrbng\.supabase\.co\/functions\/v1\/ez-chat url script-request-body https://raw.githubusercontent.com/YueBtt/QuantumultX-Scripts/main/ezcomplete_daily.js
 ^https:\/\/spuoimtqofhbdzosrbng\.supabase\.co\/(functions\/v1\/|auth\/v1\/) url script-request-header https://raw.githubusercontent.com/YueBtt/QuantumultX-Scripts/main/ezcomplete_daily.js
 
-[mitm]
 hostname = spuoimtqofhbdzosrbng.supabase.co
