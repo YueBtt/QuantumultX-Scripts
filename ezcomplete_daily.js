@@ -10,27 +10,35 @@
 const SUPABASE_URL = "https://spuoimtqofhbdzosrbng.supabase.co";
 const ANON_KEY = "sb_publishable_AzEVhLuIj1nSMwZvIgKw7A__Y3Ghdtl";
 
-// 3个账号矩阵池（生产级安全脱敏架构：优先从本地环境持久化变量读取，多键值双向兼容！）
-const ACCOUNTS = [
-    {
-        name: "主号",
-        email: $prefs.valueForKey("ez_acc1_email") || $prefs.valueForKey("ezcomplete_email") || "",
-        password: $prefs.valueForKey("ez_acc1_pwd") || $prefs.valueForKey("ezcomplete_password") || "",
-        key_token: "ezcomplete_token_main"
-    },
-    {
-        name: "小号1",
-        email: $prefs.valueForKey("ez_acc2_email") || "",
-        password: $prefs.valueForKey("ez_acc2_pwd") || "",
-        key_token: "ezcomplete_token_sub1"
-    },
-    {
-        name: "小号2",
-        email: $prefs.valueForKey("ez_acc3_email") || "",
-        password: $prefs.valueForKey("ez_acc3_pwd") || "",
-        key_token: "ezcomplete_token_sub2"
-    }
-].filter(a => a.email && a.password);
+function getPref(key) {
+    let val = $prefs.valueForKey(key);
+    if (val === null || val === undefined) return "";
+    return String(val).trim();
+}
+
+function loadAccountsFromStorage() {
+    const list = [
+        {
+            name: "主号",
+            email: getPref("ez_acc1_email") || getPref("ezcomplete_email"),
+            password: getPref("ez_acc1_pwd") || getPref("ezcomplete_password"),
+            key_token: "ezcomplete_token_main"
+        },
+        {
+            name: "小号1",
+            email: getPref("ez_acc2_email"),
+            password: getPref("ez_acc2_pwd"),
+            key_token: "ezcomplete_token_sub1"
+        },
+        {
+            name: "小号2",
+            email: getPref("ez_acc3_email"),
+            password: getPref("ez_acc3_pwd"),
+            key_token: "ezcomplete_token_sub2"
+        }
+    ];
+    return list.filter(a => Boolean(a.email) && Boolean(a.password));
+}
 
 function getRandomIP() {
     const prefixes = [104, 172, 198, 23, 45, 66, 114, 223];
@@ -177,18 +185,21 @@ const isResponse = typeof $response !== "undefined";
 if (isRequest || isResponse) {
     $done({});
 } else {
-    if (ACCOUNTS.length === 0) {
+    const accounts = loadAccountsFromStorage();
+    console.log(`[EZCompleteUI 诊断] 成功加载有效账号数: ${accounts.length}`);
+
+    if (accounts.length === 0) {
         console.log("[EZCompleteUI] 未在 QX 本地配置账号密码，跳过执行。");
         $done();
     } else {
-        console.log(`[EZCompleteUI 矩阵调度器] 开始并发调度 ${ACCOUNTS.length} 个账号...`);
+        console.log(`[EZCompleteUI 矩阵调度器] 开始并发调度 ${accounts.length} 个账号...`);
         const results = [];
-        let pending = ACCOUNTS.length;
+        let pending = accounts.length;
 
         const nowBeijing = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" }));
         const currentHour = nowBeijing.getHours();
 
-        ACCOUNTS.forEach((acc) => {
+        accounts.forEach((acc) => {
             if (acc.name !== "主号" && currentHour >= 6 && currentHour < 8) {
                 console.log(`[EZCompleteUI] 账号【${acc.name}】主动跳过 6 点轮次，等待 08:05 与大号同时起跑对齐！`);
                 results.push(`【${acc.name}】主动待命中 (对齐至 08:05 与大号同时领)`);
