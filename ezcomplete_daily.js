@@ -227,10 +227,18 @@ function claimDailyCoins(userToken, isRetry) {
                         }
                     });
                     return;
-                } else if (resp.statusCode === 400 || body.error || body.message) {
+                } else if (resp.statusCode === 400 || resp.statusCode === 429 || body.error || body.message) {
                     const msg = body.message || body.error || "冷却中或已领取";
-                    console.log(`[EZCompleteUI] 未到领取时间/冷却中: ${msg}`);
-                    $notify("EZCompleteUI 领币提示", "今日已领或未到时间", `${msg}`);
+                    let tip = `${msg}`;
+                    if (body.next_claim_at) {
+                        try {
+                            const d = new Date(body.next_claim_at);
+                            const beijingTime = d.toLocaleTimeString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
+                            tip = `冷却中，下次可领时间：${beijingTime}`;
+                        } catch (te) {}
+                    }
+                    console.log(`[EZCompleteUI] 未到领取时间/冷却中: ${tip}`);
+                    $notify("EZCompleteUI 领币提示", "未到可领时间", tip);
                 } else {
                     console.log(`[EZCompleteUI] 接口异常返回: HTTP ${resp.statusCode}`);
                     $notify("EZCompleteUI 领币异常", `HTTP ${resp.statusCode}`, resp.body || "");
