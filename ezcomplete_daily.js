@@ -137,9 +137,11 @@ function claimForAccount(acc, token, callback, isRetry) {
                 if (resp.statusCode === 200 || resp.statusCode === 201) {
                     const added = body.coins_added || body.coins || "10";
                     const balance = body.current_balance || body.balance || "未知";
+                    console.log(`[EZCompleteUI] 账号【${acc.name}】领币成功！到账 +${added}，总余额: ${balance}`);
                     callback({ ok: true, name: acc.name, balance: balance, added: added, msg: `+${added}币 (总:${balance})` });
                     return;
                 } else if (resp.statusCode === 401 && !isRetry) {
+                    console.log(`[EZCompleteUI] 账号【${acc.name}】Token失效，重新登录换票中...`);
                     loginAccount(acc, (newTok) => {
                         if (newTok) {
                             claimForAccount(acc, newTok, callback, true);
@@ -157,6 +159,7 @@ function claimForAccount(acc, token, callback, isRetry) {
                             tip = `冷却至 ${beijingTime}`;
                         } catch (te) {}
                     }
+                    console.log(`[EZCompleteUI] 账号【${acc.name}】未到时间: ${tip}`);
                     callback({ ok: true, name: acc.name, msg: tip });
                     return;
                 }
@@ -170,6 +173,7 @@ function claimForAccount(acc, token, callback, isRetry) {
 }
 
 // 调度器：并发处理所有账号并统一合并弹窗
+console.log(`[EZCompleteUI 矩阵调度器 v3.0] 开始并发调度 ${ACCOUNTS.length} 个账号...`);
 const results = [];
 let pending = ACCOUNTS.length;
 
