@@ -10,12 +10,12 @@
 const SUPABASE_URL = "https://spuoimtqofhbdzosrbng.supabase.co";
 const ANON_KEY = "sb_publishable_AzEVhLuIj1nSMwZvIgKw7A__Y3Ghdtl";
 
-// 3个账号矩阵池（生产级安全脱敏架构：优先从本地环境持久化变量读取，严禁公网硬编码泄露！）
+// 3个账号矩阵池（生产级安全脱敏架构：优先从本地环境持久化变量读取，多键值双向兼容！）
 const ACCOUNTS = [
     {
         name: "主号",
-        email: $prefs.valueForKey("ez_acc1_email") || "",
-        password: $prefs.valueForKey("ez_acc1_pwd") || "",
+        email: $prefs.valueForKey("ez_acc1_email") || $prefs.valueForKey("ezcomplete_email") || "",
+        password: $prefs.valueForKey("ez_acc1_pwd") || $prefs.valueForKey("ezcomplete_password") || "",
         key_token: "ezcomplete_token_main"
     },
     {
