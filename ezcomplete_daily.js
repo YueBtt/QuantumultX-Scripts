@@ -172,44 +172,54 @@ function claimForAccount(acc, token, callback, isRetry) {
     );
 }
 
-// 调度器：并发处理所有账号并统一合并弹窗
-console.log(`[EZCompleteUI 矩阵调度器 v3.1] 开始并发调度 ${ACCOUNTS.length} 个账号...`);
-const results = [];
-let pending = ACCOUNTS.length;
+// 只有在【定时任务（Cron）环境】下才触发领币！
+// 如果是由于重写拦截（$request / $response）进来的，绝对不执行领币，当场放行静音！
+const isRequest = typeof $request !== "undefined";
+const isResponse = typeof $response !== "undefined";
 
-// 获取当前北京时间
-const nowBeijing = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" }));
-const currentHour = nowBeijing.getHours();
-const currentMinute = nowBeijing.getMinutes();
+if (isRequest || isResponse) {
+    // 拦截到普通网络流量（如 Minis 查额度 / 调模型），当场放行，绝不弹窗、绝不触发领币！
+    $done({});
+} else {
+    // 纯定时任务调度器：并发处理所有账号并统一合并弹窗
+    console.log(`[EZCompleteUI 矩阵调度器 v3.2] 开始并发调度 ${ACCOUNTS.length} 个账号...`);
+    const results = [];
+    let pending = ACCOUNTS.length;
 
-ACCOUNTS.forEach((acc) => {
-    // 强制对齐铁律：如果当前处于早晨 6 点到 8 点之前（6:46），小号主动轮空，对齐大号到 08:05 一起领！
-    if (acc.name !== "主号" && currentHour >= 6 && currentHour < 8) {
-        console.log(`[EZCompleteUI] 账号【${acc.name}】主动跳过 6 点轮次，等待 08:05 与大号同时起跑对齐！`);
-        results.push(`【${acc.name}】主动待命中 (对齐至 08:05 与大号同时领)`);
-        checkFinish();
-        return;
-    }
+    // 获取当前北京时间
+    const nowBeijing = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" }));
+    const currentHour = nowBeijing.getHours();
+    const currentMinute = nowBeijing.getMinutes();
 
-    getValidToken(acc, (token) => {
-        if (!token) {
-            results.push(`【${acc.name}】无法获取有效Token`);
+    ACCOUNTS.forEach((acc) => {
+        // 强制对齐铁律：如果当前处于早晨 6 点到 8 点之前（6:46），小号主动轮空，对齐大号到 08:05 一起领！
+        if (acc.name !== "主号" && currentHour >= 6 && currentHour < 8) {
+            console.log(`[EZCompleteUI] 账号【${acc.name}】主动跳过 6 点轮次，等待 08:05 与大号同时起跑对齐！`);
+            results.push(`【${acc.name}】主动待命中 (对齐至 08:05 与大号同时领)`);
             checkFinish();
-        } else {
-            claimForAccount(acc, token, (res) => {
-                results.push(`【${res.name}】${res.msg}`);
-                checkFinish();
-            });
+            return;
         }
-    });
-});
 
-function checkFinish() {
-    pending--;
-    if (pending <= 0) {
-        const summary = results.join("\n");
-        console.log("[EZCompleteUI 多账号领币汇报]\n" + summary);
-        $notify("EZCompleteUI 账号矩阵领币", "3账号自动轮询完成", summary);
-        $done();
+        getValidToken(acc, (token) => {
+            if (!token) {
+                results.push(`【${acc.name}】无法获取有效Token`);
+                checkFinish();
+            } else {
+                claimForAccount(acc, token, (res) => {
+                    results.push(`【${res.name}】${res.msg}`);
+                    checkFinish();
+                });
+            }
+        });
+    });
+
+    function checkFinish() {
+        pending--;
+        if (pending <= 0) {
+            const summary = results.join("\n");
+            console.log("[EZCompleteUI 多账号领币汇报]\n" + summary);
+            $notify("EZCompleteUI 账号矩阵领币", "3账号自动轮询完成", summary);
+            $done();
+        }
     }
 }
