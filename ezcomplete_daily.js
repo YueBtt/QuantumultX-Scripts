@@ -17,23 +17,32 @@ function getPref(key) {
 }
 
 function loadAccountsFromStorage() {
+    const p1_e = getPref("ezcomplete_email") || getPref("ez_acc1_email");
+    const p1_p = getPref("ezcomplete_password") || getPref("ez_acc1_pwd");
+    const p2_e = getPref("ez_acc2_email");
+    const p2_p = getPref("ez_acc2_pwd");
+    const p3_e = getPref("ez_acc3_email");
+    const p3_p = getPref("ez_acc3_pwd");
+
+    console.log(`[EZCompleteUI 原始读取] 主号: ${p1_e ? 'OK' : '空'}|${p1_p ? 'OK' : '空'}, 小号1: ${p2_e ? 'OK' : '空'}|${p2_p ? 'OK' : '空'}, 小号2: ${p3_e ? 'OK' : '空'}|${p3_p ? 'OK' : '空'}`);
+
     const list = [
         {
             name: "主号",
-            email: getPref("ez_acc1_email") || getPref("ezcomplete_email"),
-            password: getPref("ez_acc1_pwd") || getPref("ezcomplete_password"),
+            email: p1_e,
+            password: p1_p,
             key_token: "ezcomplete_token_main"
         },
         {
             name: "小号1",
-            email: getPref("ez_acc2_email"),
-            password: getPref("ez_acc2_pwd"),
+            email: p2_e,
+            password: p2_p,
             key_token: "ezcomplete_token_sub1"
         },
         {
             name: "小号2",
-            email: getPref("ez_acc3_email"),
-            password: getPref("ez_acc3_pwd"),
+            email: p3_e,
+            password: p3_p,
             key_token: "ezcomplete_token_sub2"
         }
     ];
