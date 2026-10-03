@@ -173,11 +173,24 @@ function claimForAccount(acc, token, callback, isRetry) {
 }
 
 // 调度器：并发处理所有账号并统一合并弹窗
-console.log(`[EZCompleteUI 矩阵调度器 v3.0] 开始并发调度 ${ACCOUNTS.length} 个账号...`);
+console.log(`[EZCompleteUI 矩阵调度器 v3.1] 开始并发调度 ${ACCOUNTS.length} 个账号...`);
 const results = [];
 let pending = ACCOUNTS.length;
 
+// 获取当前北京时间
+const nowBeijing = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" }));
+const currentHour = nowBeijing.getHours();
+const currentMinute = nowBeijing.getMinutes();
+
 ACCOUNTS.forEach((acc) => {
+    // 强制对齐铁律：如果当前处于早晨 6 点到 8 点之前（6:46），小号主动轮空，对齐大号到 08:05 一起领！
+    if (acc.name !== "主号" && currentHour >= 6 && currentHour < 8) {
+        console.log(`[EZCompleteUI] 账号【${acc.name}】主动跳过 6 点轮次，等待 08:05 与大号同时起跑对齐！`);
+        results.push(`【${acc.name}】主动待命中 (对齐至 08:05 与大号同时领)`);
+        checkFinish();
+        return;
+    }
+
     getValidToken(acc, (token) => {
         if (!token) {
             results.push(`【${acc.name}】无法获取有效Token`);
