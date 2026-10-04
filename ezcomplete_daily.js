@@ -1,7 +1,7 @@
 /**
  * [task_local]
- * # 每 4 小时自动执行一次多账号领币（0点、4点、8点、12点、16点、20点第5分钟）
- * 5 0,4,8,12,16,20 * * * https://raw.githubusercontent.com/YueBtt/QuantumultX-Scripts/main/ezcomplete_daily.js, tag=EZCompleteUI多账号领币, img-url=https://raw.githubusercontent.com/crossutility/Quantumult-X/master/quantumult-x.png, enabled=true
+ * # 每 4 小时自动执行一次多账号领币（建议第 10 分钟触发，避让领取时产生的秒级/分钟级网络延时）
+ * 10 0,4,8,12,16,20 * * * https://raw.githubusercontent.com/YueBtt/QuantumultX-Scripts/main/ezcomplete_daily.js, tag=EZCompleteUI多账号领币, img-url=https://raw.githubusercontent.com/crossutility/Quantumult-X/master/quantumult-x.png, enabled=true
  *
  * [mitm]
  * hostname = spuoimtqofhbdzosrbng.supabase.co
@@ -168,13 +168,26 @@ function claimForAccount(acc, token, callback, isRetry) {
                     return;
                 } else if (resp.statusCode === 400 || resp.statusCode === 429 || body.error || body.message) {
                     let tip = "冷却中";
+                    let remainMs = 0;
                     if (body.next_claim_at) {
                         try {
                             const d = new Date(body.next_claim_at);
+                            remainMs = d.getTime() - Date.now();
                             const beijingTime = d.toLocaleTimeString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
                             tip = `冷却至 ${beijingTime}`;
                         } catch (te) {}
                     }
+
+                    // 核心自愈：若只差不到 90 秒（秒级/微分钟级竞态抖动），自动等待并精准补枪！
+                    if (!isRetry && remainMs > 0 && remainMs <= 90 * 1000) {
+                        const waitSec = Math.ceil(remainMs / 1000) + 3; // 多给 3 秒绝对安全缓冲
+                        console.log(`[EZCompleteUI] 账号【${acc.name}】临界抖动（差 ${Math.ceil(remainMs / 1000)} 秒），自动原地休眠 ${waitSec} 秒后精准补枪！`);
+                        setTimeout(() => {
+                            claimForAccount(acc, token, callback, true);
+                        }, waitSec * 1000);
+                        return;
+                    }
+
                     console.log(`[EZCompleteUI] 账号【${acc.name}】未到时间: ${tip}`);
                     callback({ ok: true, name: acc.name, msg: tip });
                     return;

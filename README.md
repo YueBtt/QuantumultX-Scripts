@@ -16,8 +16,8 @@
 
 ```ini
 [task_local]
-# 每 4 小时第 5 分钟自动执行一次
-5 0,4,8,12,16,20 * * * https://raw.githubusercontent.com/YueBtt/QuantumultX-Scripts/main/ezcomplete_daily.js, tag=EZCompleteUI多账号领币, img-url=https://raw.githubusercontent.com/crossutility/Quantumult-X/master/quantumult-x.png, enabled=true
+# 每 4 小时第 10 分钟自动执行一次（避开整点/第5分钟可能残留的几秒或几十秒网络延迟抖动）
+10 0,4,8,12,16,20 * * * https://raw.githubusercontent.com/YueBtt/QuantumultX-Scripts/main/ezcomplete_daily.js, tag=EZCompleteUI多账号领币, img-url=https://raw.githubusercontent.com/crossutility/Quantumult-X/master/quantumult-x.png, enabled=true
 
 [mitm]
 hostname = spuoimtqofhbdzosrbng.supabase.co
@@ -56,3 +56,5 @@ $prefs.setValueForKey("小号1密码", "ez_acc2_pwd");
 - **按需启用**：未配置的账号槽位会自动静默跳过；哪怕只配置一个主号，脚本也会完美单号运行！
 - **步调对齐**：脚本自动计算账号冷却时间，智能避让并对齐主号，每 4 小时多账号同时起跑领币。
 - **动态防封**：每次发包自动轮换随机伪装 IP 头（`X-Forwarded-For`），有效降低多账号同 IP 风控风险。
+- **临界智能等待（防秒级抖动误判）**：当遇到网络延时导致各账号领币时间存在几秒或几十秒误差时，若检测到冷却剩余时间 <= 90 秒，脚本自动原地倒计时休眠等待，并自动发起精准二次补枪，彻底杜绝因为提前几秒而导致的领取扑空！
+
