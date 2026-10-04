@@ -208,7 +208,8 @@ if (typeof $request !== "undefined") {
             $prefs.setValueForKey(token, "ezcomplete_token_main");
             $prefs.setValueForKey(token, "ezcomplete_token");
             console.log("[EZCompleteUI 重写捕获] 成功抓取最新 Bearer Token 并持久化！");
-            $notify("EZCompleteUI", "🎉 Token 自动更新成功", "已通过网络重写无感捕获并持久化最新凭据");
+            // 静默持久化，彻底屏蔽高频弹窗骚扰
+            // $notify("EZCompleteUI", "🎉 Token 自动更新成功", "已通过网络重写无感捕获并持久化最新凭据");
         }
     }
     $done({});
