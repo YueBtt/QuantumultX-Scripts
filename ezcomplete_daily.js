@@ -198,54 +198,71 @@ function claimForAccount(acc, token, callback, isRetry) {
     );
 }
 
-// 主入口：纯粹的定时任务领币调度器
-const accounts = loadAccountsFromStorage();
-console.log(`[EZCompleteUI 诊断] 成功加载有效账号数: ${accounts.length}`);
-
-if (accounts.length === 0) {
-    console.log("[EZCompleteUI] 未在 QX 本地配置账号密码，跳过执行。");
-    $done();
-} else {
-    console.log(`[EZCompleteUI 矩阵调度器] 开始并发调度 ${accounts.length} 个账号...`);
-    const results = [];
-    let pending = accounts.length;
-
-    const nowBeijing = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" }));
-    const currentHour = nowBeijing.getHours();
-
-    accounts.forEach((acc) => {
-        if (acc.name !== "主号" && currentHour >= 6 && currentHour < 8) {
-            console.log(`[EZCompleteUI] 账号【${acc.name}】主动跳过 6 点轮次，等待 08:05 与大号同时起跑对齐！`);
-            results.push(`【${acc.name}】主动待命中 (对齐至 08:05 与大号同时领)`);
-            checkFinish();
-            return;
+// ================== 分支1：重写捕获 Token ==================
+if (typeof $request !== "undefined") {
+    const headers = $request.headers || {};
+    const authHeader = headers["Authorization"] || headers["authorization"];
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+        const token = authHeader.replace("Bearer ", "").trim();
+        if (token && token.length > 20) {
+            $prefs.setValueForKey(token, "ezcomplete_token_main");
+            $prefs.setValueForKey(token, "ezcomplete_token");
+            console.log("[EZCompleteUI 重写捕获] 成功抓取最新 Bearer Token 并持久化！");
+            $notify("EZCompleteUI", "🎉 Token 自动更新成功", "已通过网络重写无感捕获并持久化最新凭据");
         }
+    }
+    $done({});
+} else {
+    // ================== 分支2：定时任务领币调度器 ==================
+    const accounts = loadAccountsFromStorage();
+    console.log(`[EZCompleteUI 诊断] 成功加载有效账号数: ${accounts.length}`);
 
-        getValidToken(acc, (token) => {
-            if (!token) {
-                results.push(`【${acc.name}】无法获取有效Token`);
+    if (accounts.length === 0) {
+        console.log("[EZCompleteUI] 未在 QX 本地配置账号密码，跳过执行。");
+        $done();
+    } else {
+        console.log(`[EZCompleteUI 矩阵调度器] 开始并发调度 ${accounts.length} 个账号...`);
+        const results = [];
+        let pending = accounts.length;
+
+        const nowBeijing = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" }));
+        const currentHour = nowBeijing.getHours();
+
+        accounts.forEach((acc) => {
+            if (acc.name !== "主号" && currentHour >= 6 && currentHour < 8) {
+                console.log(`[EZCompleteUI] 账号【${acc.name}】主动跳过 6 点轮次，等待 08:05 与大号同时起跑对齐！`);
+                results.push(`【${acc.name}】主动待命中 (对齐至 08:05 与大号同时领)`);
                 checkFinish();
-            } else {
-                claimForAccount(acc, token, (res) => {
-                    results.push(`【${res.name}】${res.msg}`);
-                    checkFinish();
-                });
+                return;
             }
-        });
-    });
 
-    function checkFinish() {
-        pending--;
-        if (pending <= 0) {
-            const summary = results.join("\n");
-            console.log("[EZCompleteUI 多账号领币汇报]\n" + summary);
-            const hasSuccess = results.some(r => r.includes("+") && r.includes("币"));
-            const hasRealError = results.some(r => r.includes("失败") || r.includes("HTTP"));
-            if (hasSuccess || hasRealError) {
-                $notify("EZCompleteUI 账号矩阵领币", hasSuccess ? "💰 领币到账汇报" : "⚠️ 领币异常提示", summary);
+            getValidToken(acc, (token) => {
+                if (!token) {
+                    results.push(`【${acc.name}】无法获取有效Token`);
+                    checkFinish();
+                } else {
+                    claimForAccount(acc, token, (res) => {
+                        results.push(`【${res.name}】${res.msg}`);
+                        checkFinish();
+                    });
+                }
+            });
+        });
+
+        function checkFinish() {
+            pending--;
+            if (pending <= 0) {
+                const summary = results.join("\n");
+                console.log("[EZCompleteUI 多账号领币汇报]\n" + summary);
+                const hasSuccess = results.some(r => r.includes("+") && r.includes("币"));
+                const hasRealError = results.some(r => r.includes("失败") || r.includes("HTTP"));
+                if (hasSuccess || hasRealError) {
+                    $notify("EZCompleteUI 账号矩阵领币", hasSuccess ? "💰 领币到账汇报" : "⚠️ 领币异常提示", summary);
+                }
+                $done();
             }
-            $done();
         }
     }
 }
+
 

@@ -1,0 +1,7 @@
+# EZCompleteUI 专属重写规则与 MITM 配置
+# 仓库：YueBtt/QuantumultX-Scripts
+
+# 自动捕获登录与鉴权凭据 Token (仅拦截 Header，绝不触碰任何聊天/模型数据)
+^https:\/\/spuoimtqofhbdzosrbng\.supabase\.co\/(functions\/v1\/|auth\/v1\/) url script-request-header https://raw.githubusercontent.com/YueBtt/QuantumultX-Scripts/main/ezcomplete_daily.js
+
+hostname = spuoimtqofhbdzosrbng.supabase.co

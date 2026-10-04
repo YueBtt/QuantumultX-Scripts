@@ -18,9 +18,14 @@
 [task_local]
 # 每 4 小时第 10 分钟自动执行一次（避开整点/第5分钟可能残留的几秒或几十秒网络延迟抖动）
 10 0,4,8,12,16,20 * * * https://raw.githubusercontent.com/YueBtt/QuantumultX-Scripts/main/ezcomplete_daily.js, tag=EZCompleteUI多账号领币, img-url=https://raw.githubusercontent.com/crossutility/Quantumult-X/master/quantumult-x.png, enabled=true
-```
 
-> **提示**：本脚本为纯 Task 定时任务（通过 `$task.fetch` 直接发起 HTTP 请求），**无需配置 MITM 证书**，也**无需开启重写 Rewrite**，轻量且原生！
+# （可选）重写远程订阅：打开 App 时无感自动捕获/更新最新 Token
+[rewrite_remote]
+https://raw.githubusercontent.com/YueBtt/QuantumultX-Scripts/main/ezcomplete.snippet, tag=EZCompleteUI, enabled=true
+
+[mitm]
+hostname = spuoimtqofhbdzosrbng.supabase.co
+```
 
 ---
 
