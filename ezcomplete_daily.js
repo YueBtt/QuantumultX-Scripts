@@ -211,8 +211,8 @@ if (ACCOUNTS.length === 0) {
 function finishAll(results) {
     results.sort((a, b) => a.name.localeCompare(b.name));
     const lines = results.map(r => `【${r.name}】${r.text}`);
-    const summary = lines.join("\n");
-    console.log(`[EZCompleteUI 多账号领币汇报]\n${summary}`);
+    const summary = lines.join("\\n");
+    console.log(`[EZCompleteUI 多账号领币汇报]\\n${summary}`);
     $notify("EZCompleteUI 10账号矩阵领币", `已完成 ${results.length} 个账号全量轮询`, summary);
     $done();
 }
