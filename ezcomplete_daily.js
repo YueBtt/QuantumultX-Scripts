@@ -18,13 +18,13 @@ function loadAccountsFromStorage() {
     const read_debug = [];
 
     for (let i = 1; i <= 10; i++) {
-        let name = i === 1 ? "主号" : `小号${i-1}`;
-        let em = i === 1 ? (getPref("ezcomplete_email") || getPref("ez_acc1_email")) : getPref(`ez_acc${i}_email`);
-        let pwd = i === 1 ? (getPref("ezcomplete_password") || getPref("ez_acc1_pwd")) : getPref(`ez_acc${i}_pwd`);
-        let key_tok = i === 1 ? "ezcomplete_token_main" : `ezcomplete_token_acc${i}`;
+        let name = i === 1 ? "主号" : ("小号" + (i - 1));
+        let em = i === 1 ? (getPref("ezcomplete_email") || getPref("ez_acc1_email")) : getPref("ez_acc" + i + "_email");
+        let pwd = i === 1 ? (getPref("ezcomplete_password") || getPref("ez_acc1_pwd")) : getPref("ez_acc" + i + "_pwd");
+        let key_tok = i === 1 ? "ezcomplete_token_main" : ("ezcomplete_token_acc" + i);
 
         if (em && pwd) {
-            read_debug.push(`${name}: OK|OK`);
+            read_debug.push(name + ": OK|OK");
             list.push({
                 name: name,
                 email: em,
@@ -34,7 +34,7 @@ function loadAccountsFromStorage() {
         }
     }
 
-    console.log(`[EZCompleteUI 原始读取] ` + read_debug.join(", "));
+    console.log("[EZCompleteUI 原始读取] " + read_debug.join(", "));
     return list;
 }
 
@@ -67,8 +67,9 @@ function isTokenExpired(token) {
     }
 }
 
-function loginAccount(acc, callback) {
-    const loginUrl = `${SUPABASE_URL}/auth/v1/token?grant_type=password`;
+// 带自动重试机制的登录换票（最多重试 3 次，带指数退避）
+function loginAccountWithRetry(acc, callback, retryCount = 0) {
+    const loginUrl = `${SUPABASE_URL}/auth/v1/token?grant_type=password#force-timeout=15000`;
     const fakeIp = getRandomIP();
     const options = {
         url: loginUrl,
@@ -99,11 +100,25 @@ function loginAccount(acc, callback) {
                     return;
                 }
             } catch (e) {}
-            callback(null);
+
+            if (retryCount < 2) {
+                const delayMs = (retryCount + 1) * 2000;
+                console.log(`[EZCompleteUI] 账号【${acc.name}】登录解析异常，${delayMs/1000}秒后发起第 ${retryCount + 2} 次重试...`);
+                setTimeout(() => loginAccountWithRetry(acc, callback, retryCount + 1), delayMs);
+            } else {
+                console.log(`[EZCompleteUI] 账号【${acc.name}】连续 3 次登录失败！`);
+                callback(null);
+            }
         },
         err => {
-            console.log(`[EZCompleteUI] 账号【${acc.name}】登录失败: ${err}`);
-            callback(null);
+            if (retryCount < 2) {
+                const delayMs = (retryCount + 1) * 2000;
+                console.log(`[EZCompleteUI] 账号【${acc.name}】登录网络抖动 (${err})，${delayMs/1000}秒后发起第 ${retryCount + 2} 次重试...`);
+                setTimeout(() => loginAccountWithRetry(acc, callback, retryCount + 1), delayMs);
+            } else {
+                console.log(`[EZCompleteUI] 账号【${acc.name}】连续 3 次登录网络错误: ${err}`);
+                callback(null);
+            }
         }
     );
 }
@@ -114,14 +129,15 @@ function getValidToken(acc, callback) {
         tok = $prefs.valueForKey("ezcomplete_token");
     }
     if (!tok || isTokenExpired(tok)) {
-        loginAccount(acc, callback);
+        loginAccountWithRetry(acc, callback);
     } else {
         callback(tok);
     }
 }
 
-function claimForAccount(acc, token, callback, isRetry) {
-    const claimUrl = `${SUPABASE_URL}/functions/v1/claim-daily-coins`;
+// 带自动重试与临界自愈的领币逻辑（网络错误自动重试最多 3 次）
+function claimForAccountWithRetry(acc, token, callback, retryCount = 0, isJitterSelfHeal = false) {
+    const claimUrl = `${SUPABASE_URL}/functions/v1/claim-daily-coins#force-timeout=15000`;
     const fakeIp = getRandomIP();
     const options = {
         url: claimUrl,
@@ -150,11 +166,12 @@ function claimForAccount(acc, token, callback, isRetry) {
                     const now = new Date();
                     const diffSec = Math.floor((nextTime.getTime() - now.getTime()) / 1000);
 
-                    if (!isRetry && diffSec > 0 && diffSec <= 90) {
+                    // 秒级临界抖动自愈：若相差 <= 90秒，原地休眠后补枪
+                    if (!isJitterSelfHeal && diffSec > 0 && diffSec <= 90) {
                         const waitMs = (diffSec + 3) * 1000;
-                        console.log(`[EZCompleteUI] 账号【${acc.name}】处于秒级临界点 (剩余 ${diffSec}s)，进入原地休眠自愈补枪 (${waitMs/1000}s)...`);
+                        console.log(`[EZCompleteUI] 账号【${acc.name}】临界抖动 (差 ${diffSec}s)，自动原地休眠 ${waitMs/1000}s 精准补枪！`);
                         setTimeout(() => {
-                            claimForAccount(acc, token, callback, true);
+                            claimForAccountWithRetry(acc, token, callback, 0, true);
                         }, waitMs);
                         return;
                     }
@@ -164,16 +181,39 @@ function claimForAccount(acc, token, callback, isRetry) {
                     console.log(`[EZCompleteUI] 账号【${acc.name}】${msg}`);
                     callback({ name: acc.name, success: false, text: msg });
                 } else {
-                    const msg = `响应异常: ${response.body}`;
-                    console.log(`[EZCompleteUI] 账号【${acc.name}】${msg}`);
-                    callback({ name: acc.name, success: false, text: msg });
+                    // 若收到非成功返回且未超限，尝试重试
+                    if (retryCount < 2) {
+                        const delayMs = (retryCount + 1) * 2000;
+                        console.log(`[EZCompleteUI] 账号【${acc.name}】领币返回异常 (${response.body})，${delayMs/1000}s 后重试...`);
+                        setTimeout(() => claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal), delayMs);
+                    } else {
+                        const msg = `响应异常: ${response.body}`;
+                        console.log(`[EZCompleteUI] 账号【${acc.name}】${msg}`);
+                        callback({ name: acc.name, success: false, text: msg });
+                    }
                 }
             } catch (e) {
-                callback({ name: acc.name, success: false, text: `解析失败: ${e.message}` });
+                if (retryCount < 2) {
+                    const delayMs = (retryCount + 1) * 2000;
+                    console.log(`[EZCompleteUI] 账号【${acc.name}】JSON解析失败 (${e.message})，${delayMs/1000}s 后重试...`);
+                    setTimeout(() => claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal), delayMs);
+                } else {
+                    callback({ name: acc.name, success: false, text: `解析失败: ${e.message}` });
+                }
             }
         },
         err => {
-            callback({ name: acc.name, success: false, text: `网络错误: ${err}` });
+            // 核心防御点：网络错误自动重试 3 次！
+            if (retryCount < 2) {
+                const delayMs = (retryCount + 1) * 2500;
+                console.log(`[EZCompleteUI 🛡️自愈防御] 账号【${acc.name}】领币遭遇网络错误 (${err})，第 ${retryCount + 1} 次拦截并于 ${delayMs/1000}s 后自动补发...`);
+                setTimeout(() => {
+                    claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal);
+                }, delayMs);
+            } else {
+                console.log(`[EZCompleteUI] 账号【${acc.name}】连续 3 次网络错误，宣告本轮放弃: ${err}`);
+                callback({ name: acc.name, success: false, text: `网络错误 (已自动重试3次): ${err}` });
+            }
         }
     );
 }
@@ -188,46 +228,48 @@ if (ACCOUNTS.length === 0) {
 } else {
     // 强制时间对齐逻辑：小号1和小号2暂停凌晨4点的领取，全部整齐划一对齐到 08:00:00 之后！
     const now = new Date();
-    // 判定是否在 2026-10-06 08:00 之前（当前是凌晨 03:57~04:xx）
     const targetAlignTime = new Date();
-    targetAlignTime.setHours(8, 0, 0, 0); // 今天早晨 8点
+    targetAlignTime.setHours(8, 0, 0, 0); // 今天早晨 8点整
 
-    let filteredAccounts = ACCOUNTS;
     if (now < targetAlignTime) {
         console.log("[EZCompleteUI 对齐控制] 检测到处于 08:00 之前，暂停【小号1】与【小号2】的临时领币，全矩阵对齐至 08:00 统一触发！");
     }
 
-    console.log(`[EZCompleteUI 矩阵调度器] 开始并发调度 ${filteredAccounts.length} 个账号...`);
+    console.log(`[EZCompleteUI 矩阵调度器] 开始错峰并发调度 ${ACCOUNTS.length} 个账号...`);
     let completed = 0;
     const results = [];
 
-    filteredAccounts.forEach(acc => {
-        // 如果是小号1或小号2且当前时间小于早晨8点，直接跳过并汇报等待对齐
-        if (now < targetAlignTime && (acc.name === "小号1" || acc.name === "小号2")) {
-            const skipMsg = "⏸️ 动作暂停：避让 04:10 触发，等待 08:00 全矩阵统一步调对齐！";
-            console.log(`[EZCompleteUI] 账号【${acc.name}】${skipMsg}`);
-            results.push({ name: acc.name, success: false, text: skipMsg });
-            completed++;
-            if (completed === filteredAccounts.length) finishAll(results);
-            return;
-        }
+    // 工业级错峰队列：每个账号间隔 350ms 发送，彻底解决瞬间高并发导致的网络拥塞与丟包
+    ACCOUNTS.forEach((acc, idx) => {
+        const staggerDelay = idx * 350;
 
-        getValidToken(acc, token => {
-            if (!token) {
-                results.push({ name: acc.name, success: false, text: "获取/刷新 Token 失败" });
+        setTimeout(() => {
+            // 如果是小号1或小号2且当前时间早于8点，跳过避让对齐
+            if (now < targetAlignTime && (acc.name === "小号1" || acc.name === "小号2")) {
+                const skipMsg = "⏸️ 动作暂停：避让 04:10 触发，等待 08:00 全矩阵统一步调对齐！";
+                console.log(`[EZCompleteUI] 账号【${acc.name}】${skipMsg}`);
+                results.push({ name: acc.name, success: false, text: skipMsg });
                 completed++;
-                if (completed === filteredAccounts.length) finishAll(results);
+                if (completed === ACCOUNTS.length) finishAll(results);
                 return;
             }
 
-            claimForAccount(acc, token, res => {
-                results.push(res);
-                completed++;
-                if (completed === filteredAccounts.length) finishAll(results);
+            getValidToken(acc, token => {
+                if (!token) {
+                    results.push({ name: acc.name, success: false, text: "获取/刷新 Token 失败" });
+                    completed++;
+                    if (completed === ACCOUNTS.length) finishAll(results);
+                    return;
+                }
+
+                claimForAccountWithRetry(acc, token, res => {
+                    results.push(res);
+                    completed++;
+                    if (completed === ACCOUNTS.length) finishAll(results);
+                });
             });
-        });
+        }, staggerDelay);
     });
-});
 }
 
 function finishAll(results) {
