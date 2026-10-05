@@ -186,33 +186,55 @@ if (ACCOUNTS.length === 0) {
     console.log("[EZCompleteUI] 未在 QX 本地配置任何有效账号密码，跳过执行。");
     $done();
 } else {
-    console.log(`[EZCompleteUI 矩阵调度器] 开始并发调度 ${ACCOUNTS.length} 个账号...`);
+    // 强制时间对齐逻辑：小号1和小号2暂停凌晨4点的领取，全部整齐划一对齐到 08:00:00 之后！
+    const now = new Date();
+    // 判定是否在 2026-10-06 08:00 之前（当前是凌晨 03:57~04:xx）
+    const targetAlignTime = new Date();
+    targetAlignTime.setHours(8, 0, 0, 0); // 今天早晨 8点
+
+    let filteredAccounts = ACCOUNTS;
+    if (now < targetAlignTime) {
+        console.log("[EZCompleteUI 对齐控制] 检测到处于 08:00 之前，暂停【小号1】与【小号2】的临时领币，全矩阵对齐至 08:00 统一触发！");
+    }
+
+    console.log(`[EZCompleteUI 矩阵调度器] 开始并发调度 ${filteredAccounts.length} 个账号...`);
     let completed = 0;
     const results = [];
 
-    ACCOUNTS.forEach(acc => {
+    filteredAccounts.forEach(acc => {
+        // 如果是小号1或小号2且当前时间小于早晨8点，直接跳过并汇报等待对齐
+        if (now < targetAlignTime && (acc.name === "小号1" || acc.name === "小号2")) {
+            const skipMsg = "⏸️ 动作暂停：避让 04:10 触发，等待 08:00 全矩阵统一步调对齐！";
+            console.log(`[EZCompleteUI] 账号【${acc.name}】${skipMsg}`);
+            results.push({ name: acc.name, success: false, text: skipMsg });
+            completed++;
+            if (completed === filteredAccounts.length) finishAll(results);
+            return;
+        }
+
         getValidToken(acc, token => {
             if (!token) {
                 results.push({ name: acc.name, success: false, text: "获取/刷新 Token 失败" });
                 completed++;
-                if (completed === ACCOUNTS.length) finishAll(results);
+                if (completed === filteredAccounts.length) finishAll(results);
                 return;
             }
 
             claimForAccount(acc, token, res => {
                 results.push(res);
                 completed++;
-                if (completed === ACCOUNTS.length) finishAll(results);
+                if (completed === filteredAccounts.length) finishAll(results);
             });
         });
     });
+});
 }
 
 function finishAll(results) {
     results.sort((a, b) => a.name.localeCompare(b.name));
     const lines = results.map(r => `【${r.name}】${r.text}`);
-    const summary = lines.join("\\n");
-    console.log(`[EZCompleteUI 多账号领币汇报]\\n${summary}`);
+    const summary = lines.join("\n");
+    console.log(`[EZCompleteUI 多账号领币汇报]\n${summary}`);
     $notify("EZCompleteUI 10账号矩阵领币", `已完成 ${results.length} 个账号全量轮询`, summary);
     $done();
 }
