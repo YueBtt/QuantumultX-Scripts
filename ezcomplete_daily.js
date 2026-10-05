@@ -18,10 +18,10 @@ function loadAccountsFromStorage() {
     const read_debug = [];
 
     for (let i = 1; i <= 10; i++) {
-        let name = i === 1 ? '主号' : `小号${i-1}`;
-        let em = i === 1 ? (getPref('ezcomplete_email') || getPref('ez_acc1_email')) : getPref(`ez_acc${i}_email`);
-        let pwd = i === 1 ? (getPref('ezcomplete_password') || getPref('ez_acc1_pwd')) : getPref(`ez_acc${i}_pwd`);
-        let key_tok = i === 1 ? 'ezcomplete_token_main' : `ezcomplete_token_acc${i}`;
+        let name = i === 1 ? "主号" : `小号${i-1}`;
+        let em = i === 1 ? (getPref("ezcomplete_email") || getPref("ez_acc1_email")) : getPref(`ez_acc${i}_email`);
+        let pwd = i === 1 ? (getPref("ezcomplete_password") || getPref("ez_acc1_pwd")) : getPref(`ez_acc${i}_pwd`);
+        let key_tok = i === 1 ? "ezcomplete_token_main" : `ezcomplete_token_acc${i}`;
 
         if (em && pwd) {
             read_debug.push(`${name}: OK|OK`);
@@ -34,7 +34,7 @@ function loadAccountsFromStorage() {
         }
     }
 
-    console.log(`[EZCompleteUI 原始读取] ` + read_debug.join(', '));
+    console.log(`[EZCompleteUI 原始读取] ` + read_debug.join(", "));
     return list;
 }
 
@@ -70,28 +70,31 @@ function isTokenExpired(token) {
 function loginAccount(acc, callback) {
     const loginUrl = `${SUPABASE_URL}/auth/v1/token?grant_type=password`;
     const fakeIp = getRandomIP();
-    const opts = {
+    const options = {
         url: loginUrl,
         method: "POST",
         headers: {
             "apikey": ANON_KEY,
             "Content-Type": "application/json",
-            "User-Agent": "EZCompleteUI/7.1.4 (iPhone; iOS 16.0; Scale/3.00)",
             "X-Forwarded-For": fakeIp,
-            "X-Real-IP": fakeIp
+            "Client-IP": fakeIp,
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"
         },
-        body: JSON.stringify({ email: acc.email, password: acc.password })
+        body: JSON.stringify({
+            email: acc.email,
+            password: acc.password
+        })
     };
-    $task.fetch(opts).then(
-        resp => {
+
+    $task.fetch(options).then(
+        response => {
             try {
-                const b = JSON.parse(resp.body);
+                const b = JSON.parse(response.body);
                 if (b.access_token) {
                     $prefs.setValueForKey(b.access_token, acc.key_token);
                     if (acc.name === "主号") {
                         $prefs.setValueForKey(b.access_token, "ezcomplete_token");
                     }
-                    console.log(`[EZCompleteUI] 账号【${acc.name}】登录换票成功！`);
                     callback(b.access_token);
                     return;
                 }
@@ -127,134 +130,89 @@ function claimForAccount(acc, token, callback, isRetry) {
             "apikey": ANON_KEY,
             "Authorization": `Bearer ${token}`,
             "Content-Type": "application/json",
-            "User-Agent": "EZCompleteUI/7.1.4 (iPhone; iOS 16.0; Scale/3.00)",
             "X-Forwarded-For": fakeIp,
-            "X-Real-IP": fakeIp,
-            "Client-IP": fakeIp
+            "Client-IP": fakeIp,
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"
         },
         body: "{}"
     };
 
     $task.fetch(options).then(
-        resp => {
+        response => {
             try {
-                const body = JSON.parse(resp.body);
-                if (resp.statusCode === 200 || resp.statusCode === 201) {
-                    const added = body.coins_added || body.coins || "10";
-                    const balance = body.current_balance || body.balance || "未知";
-                    console.log(`[EZCompleteUI] 账号【${acc.name}】领币成功！到账 +${added}，总余额: ${balance}`);
-                    callback({ ok: true, name: acc.name, balance: balance, added: added, msg: `+${added}币 (总:${balance})` });
-                    return;
-                } else if (resp.statusCode === 401 && !isRetry) {
-                    console.log(`[EZCompleteUI] 账号【${acc.name}】Token失效，重新登录换票中...`);
-                    loginAccount(acc, (newTok) => {
-                        if (newTok) {
-                            claimForAccount(acc, newTok, callback, true);
-                        } else {
-                            callback({ ok: false, name: acc.name, msg: "Token已失效且登录失败" });
-                        }
-                    });
-                    return;
-                } else if (resp.statusCode === 400 || resp.statusCode === 429 || body.error || body.message) {
-                    let tip = "冷却中";
-                    let remainMs = 0;
-                    if (body.next_claim_at) {
-                        try {
-                            const d = new Date(body.next_claim_at);
-                            remainMs = d.getTime() - Date.now();
-                            const beijingTime = d.toLocaleTimeString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
-                            tip = `冷却至 ${beijingTime}`;
-                        } catch (te) {}
-                    }
+                const res = JSON.parse(response.body);
+                if (res.success) {
+                    const msg = `🎉 领币成功！+${res.coins_added} 币 (余额: ${res.balance})`;
+                    console.log(`[EZCompleteUI] 账号【${acc.name}】${msg}`);
+                    callback({ name: acc.name, success: true, text: msg });
+                } else if (res.next_claim_at) {
+                    const nextTime = new Date(res.next_claim_at);
+                    const now = new Date();
+                    const diffSec = Math.floor((nextTime.getTime() - now.getTime()) / 1000);
 
-                    // 核心自愈：若只差不到 90 秒（秒级/微分钟级竞态抖动），自动等待并精准补枪！
-                    if (!isRetry && remainMs > 0 && remainMs <= 90 * 1000) {
-                        const waitSec = Math.ceil(remainMs / 1000) + 3; // 多给 3 秒绝对安全缓冲
-                        console.log(`[EZCompleteUI] 账号【${acc.name}】临界抖动（差 ${Math.ceil(remainMs / 1000)} 秒），自动原地休眠 ${waitSec} 秒后精准补枪！`);
+                    if (!isRetry && diffSec > 0 && diffSec <= 90) {
+                        const waitMs = (diffSec + 3) * 1000;
+                        console.log(`[EZCompleteUI] 账号【${acc.name}】处于秒级临界点 (剩余 ${diffSec}s)，进入原地休眠自愈补枪 (${waitMs/1000}s)...`);
                         setTimeout(() => {
                             claimForAccount(acc, token, callback, true);
-                        }, waitSec * 1000);
+                        }, waitMs);
                         return;
                     }
 
-                    console.log(`[EZCompleteUI] 账号【${acc.name}】未到时间: ${tip}`);
-                    callback({ ok: true, name: acc.name, msg: tip });
-                    return;
+                    const timeStr = nextTime.toTimeString().split(" ")[0];
+                    const msg = `未到时间: 冷却至 ${timeStr}`;
+                    console.log(`[EZCompleteUI] 账号【${acc.name}】${msg}`);
+                    callback({ name: acc.name, success: false, text: msg });
+                } else {
+                    const msg = `响应异常: ${response.body}`;
+                    console.log(`[EZCompleteUI] 账号【${acc.name}】${msg}`);
+                    callback({ name: acc.name, success: false, text: msg });
                 }
-            } catch (e) {}
-            callback({ ok: false, name: acc.name, msg: `HTTP ${resp.statusCode}` });
+            } catch (e) {
+                callback({ name: acc.name, success: false, text: `解析失败: ${e.message}` });
+            }
         },
         err => {
-            callback({ ok: false, name: acc.name, msg: "网络错误" });
+            callback({ name: acc.name, success: false, text: `网络错误: ${err}` });
         }
     );
 }
 
-// ================== 分支1：重写捕获 Token ==================
-if (typeof $request !== "undefined") {
-    const headers = $request.headers || {};
-    const authHeader = headers["Authorization"] || headers["authorization"];
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-        const token = authHeader.replace("Bearer ", "").trim();
-        if (token && token.length > 20) {
-            $prefs.setValueForKey(token, "ezcomplete_token_main");
-            $prefs.setValueForKey(token, "ezcomplete_token");
-            console.log("[EZCompleteUI 重写捕获] 成功抓取最新 Bearer Token 并持久化！");
-            // 静默持久化，彻底屏蔽高频弹窗骚扰
-            // $notify("EZCompleteUI", "🎉 Token 自动更新成功", "已通过网络重写无感捕获并持久化最新凭据");
-        }
-    }
-    $done({});
+// 调度主逻辑
+const ACCOUNTS = loadAccountsFromStorage();
+console.log(`[EZCompleteUI 诊断] 成功加载有效账号数: ${ACCOUNTS.length}`);
+
+if (ACCOUNTS.length === 0) {
+    console.log("[EZCompleteUI] 未在 QX 本地配置任何有效账号密码，跳过执行。");
+    $done();
 } else {
-    // ================== 分支2：定时任务领币调度器 ==================
-    const accounts = loadAccountsFromStorage();
-    console.log(`[EZCompleteUI 诊断] 成功加载有效账号数: ${accounts.length}`);
+    console.log(`[EZCompleteUI 矩阵调度器] 开始并发调度 ${ACCOUNTS.length} 个账号...`);
+    let completed = 0;
+    const results = [];
 
-    if (accounts.length === 0) {
-        console.log("[EZCompleteUI] 未在 QX 本地配置账号密码，跳过执行。");
-        $done();
-    } else {
-        console.log(`[EZCompleteUI 矩阵调度器] 开始并发调度 ${accounts.length} 个账号...`);
-        const results = [];
-        let pending = accounts.length;
-
-        const nowBeijing = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Shanghai" }));
-        const currentHour = nowBeijing.getHours();
-
-        accounts.forEach((acc) => {
-            if (acc.name !== "主号" && currentHour >= 6 && currentHour < 8) {
-                console.log(`[EZCompleteUI] 账号【${acc.name}】主动跳过 6 点轮次，等待 08:05 与大号同时起跑对齐！`);
-                results.push(`【${acc.name}】主动待命中 (对齐至 08:05 与大号同时领)`);
-                checkFinish();
+    ACCOUNTS.forEach(acc => {
+        getValidToken(acc, token => {
+            if (!token) {
+                results.push({ name: acc.name, success: false, text: "获取/刷新 Token 失败" });
+                completed++;
+                if (completed === ACCOUNTS.length) finishAll(results);
                 return;
             }
 
-            getValidToken(acc, (token) => {
-                if (!token) {
-                    results.push(`【${acc.name}】无法获取有效Token`);
-                    checkFinish();
-                } else {
-                    claimForAccount(acc, token, (res) => {
-                        results.push(`【${res.name}】${res.msg}`);
-                        checkFinish();
-                    });
-                }
+            claimForAccount(acc, token, res => {
+                results.push(res);
+                completed++;
+                if (completed === ACCOUNTS.length) finishAll(results);
             });
         });
-
-        function checkFinish() {
-            pending--;
-            if (pending <= 0) {
-                const summary = results.join("\n");
-                console.log("[EZCompleteUI 多账号领币汇报]\n" + summary);
-                const hasSuccess = results.some(r => r.includes("+") && r.includes("币"));
-                const hasRealError = results.some(r => r.includes("失败") || r.includes("HTTP"));
-                if (hasSuccess || hasRealError) {
-                    $notify("EZCompleteUI 账号矩阵领币", hasSuccess ? "💰 领币到账汇报" : "⚠️ 领币异常提示", summary);
-                }
-                $done();
-            }
-        }
-    }
+    });
 }
 
+function finishAll(results) {
+    results.sort((a, b) => a.name.localeCompare(b.name));
+    const lines = results.map(r => `【${r.name}】${r.text}`);
+    const summary = lines.join("\n");
+    console.log(`[EZCompleteUI 多账号领币汇报]\n${summary}`);
+    $notify("EZCompleteUI 10账号矩阵领币", `已完成 ${results.length} 个账号全量轮询`, summary);
+    $done();
+}
