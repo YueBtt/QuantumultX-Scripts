@@ -14,36 +14,28 @@ function getPref(key) {
 }
 
 function loadAccountsFromStorage() {
-    const p1_e = getPref("ezcomplete_email") || getPref("ez_acc1_email");
-    const p1_p = getPref("ezcomplete_password") || getPref("ez_acc1_pwd");
-    const p2_e = getPref("ez_acc2_email");
-    const p2_p = getPref("ez_acc2_pwd");
-    const p3_e = getPref("ez_acc3_email");
-    const p3_p = getPref("ez_acc3_pwd");
+    const list = [];
+    const read_debug = [];
 
-    console.log(`[EZCompleteUI 原始读取] 主号: ${p1_e ? 'OK' : '空'}|${p1_p ? 'OK' : '空'}, 小号1: ${p2_e ? 'OK' : '空'}|${p2_p ? 'OK' : '空'}, 小号2: ${p3_e ? 'OK' : '空'}|${p3_p ? 'OK' : '空'}`);
+    for (let i = 1; i <= 10; i++) {
+        let name = i === 1 ? '主号' : `小号${i-1}`;
+        let em = i === 1 ? (getPref('ezcomplete_email') || getPref('ez_acc1_email')) : getPref(`ez_acc${i}_email`);
+        let pwd = i === 1 ? (getPref('ezcomplete_password') || getPref('ez_acc1_pwd')) : getPref(`ez_acc${i}_pwd`);
+        let key_tok = i === 1 ? 'ezcomplete_token_main' : `ezcomplete_token_acc${i}`;
 
-    const list = [
-        {
-            name: "主号",
-            email: p1_e,
-            password: p1_p,
-            key_token: "ezcomplete_token_main"
-        },
-        {
-            name: "小号1",
-            email: p2_e,
-            password: p2_p,
-            key_token: "ezcomplete_token_sub1"
-        },
-        {
-            name: "小号2",
-            email: p3_e,
-            password: p3_p,
-            key_token: "ezcomplete_token_sub2"
+        if (em && pwd) {
+            read_debug.push(`${name}: OK|OK`);
+            list.push({
+                name: name,
+                email: em,
+                password: pwd,
+                key_token: key_tok
+            });
         }
-    ];
-    return list.filter(a => Boolean(a.email) && Boolean(a.password));
+    }
+
+    console.log(`[EZCompleteUI 原始读取] ` + read_debug.join(', '));
+    return list;
 }
 
 function getRandomIP() {
@@ -265,5 +257,4 @@ if (typeof $request !== "undefined") {
         }
     }
 }
-
 
