@@ -1,6 +1,6 @@
 /**
  * [task_local]
- * # 每 4 小时自动执行一次多账号领币（建议第 10 分钟触发，避让领取时产生的秒级/分钟级网络延时）
+ * # 每 4 小时自动执行一次多账号领币
  * 10 0,4,8,12,16,20 * * * https://raw.githubusercontent.com/YueBtt/QuantumultX-Scripts/main/ezcomplete_daily.js, tag=EZCompleteUI多账号领币, img-url=https://raw.githubusercontent.com/crossutility/Quantumult-X/master/quantumult-x.png, enabled=true
  */
 
@@ -44,30 +44,7 @@ function getRandomIP() {
     return `${p}.${Math.floor(Math.random() * 240 + 10)}.${Math.floor(Math.random() * 240 + 10)}.${Math.floor(Math.random() * 240 + 10)}`;
 }
 
-function isTokenExpired(token) {
-    if (!token) return true;
-    try {
-        const parts = token.split(".");
-        if (parts.length < 2) return true;
-        let base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-        while (base64.length % 4) {
-            base64 += "=";
-        }
-        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
-        let output = "";
-        for (let bc = 0, bs = 0, buffer, idx = 0; buffer = base64.charAt(idx++); ~buffer && (bs = bc % 4 ? bs * 64 + buffer : buffer, bc++ % 4) ? output += String.fromCharCode(255 & bs >> (-2 * bc & 6)) : 0) {
-            buffer = chars.indexOf(buffer);
-        }
-        const json = JSON.parse(output);
-        const exp = json.exp;
-        const now = Math.floor(Date.now() / 1000);
-        return exp - now < 120;
-    } catch (e) {
-        return false;
-    }
-}
-
-// 带自动重试机制的登录换票（最多重试 3 次，带指数退避）
+// 登录换票（带重试机制，每次强制获取最新 Token）
 function loginAccountWithRetry(acc, callback, retryCount = 0) {
     const loginUrl = `${SUPABASE_URL}/auth/v1/token?grant_type=password#force-timeout=15000`;
     const fakeIp = getRandomIP();
@@ -96,6 +73,7 @@ function loginAccountWithRetry(acc, callback, retryCount = 0) {
                     if (acc.name === "主号") {
                         $prefs.setValueForKey(b.access_token, "ezcomplete_token");
                     }
+                    console.log(`[EZCompleteUI] 账号【${acc.name}】登录换票成功！`);
                     callback(b.access_token);
                     return;
                 }
@@ -103,7 +81,7 @@ function loginAccountWithRetry(acc, callback, retryCount = 0) {
 
             if (retryCount < 2) {
                 const delayMs = (retryCount + 1) * 2000;
-                console.log(`[EZCompleteUI] 账号【${acc.name}】登录解析异常，${delayMs/1000}秒后发起第 ${retryCount + 2} 次重试...`);
+                console.log(`[EZCompleteUI] 账号【${acc.name}】登录解析异常，${delayMs/1000}s 后重试...`);
                 setTimeout(() => loginAccountWithRetry(acc, callback, retryCount + 1), delayMs);
             } else {
                 console.log(`[EZCompleteUI] 账号【${acc.name}】连续 3 次登录失败！`);
@@ -113,7 +91,7 @@ function loginAccountWithRetry(acc, callback, retryCount = 0) {
         err => {
             if (retryCount < 2) {
                 const delayMs = (retryCount + 1) * 2000;
-                console.log(`[EZCompleteUI] 账号【${acc.name}】登录网络抖动 (${err})，${delayMs/1000}秒后发起第 ${retryCount + 2} 次重试...`);
+                console.log(`[EZCompleteUI] 账号【${acc.name}】登录网络抖动 (${err})，${delayMs/1000}s 后重试...`);
                 setTimeout(() => loginAccountWithRetry(acc, callback, retryCount + 1), delayMs);
             } else {
                 console.log(`[EZCompleteUI] 账号【${acc.name}】连续 3 次登录网络错误: ${err}`);
@@ -123,19 +101,7 @@ function loginAccountWithRetry(acc, callback, retryCount = 0) {
     );
 }
 
-function getValidToken(acc, callback) {
-    let tok = $prefs.valueForKey(acc.key_token);
-    if (!tok && acc.name === "主号") {
-        tok = $prefs.valueForKey("ezcomplete_token");
-    }
-    if (!tok || isTokenExpired(tok)) {
-        loginAccountWithRetry(acc, callback);
-    } else {
-        callback(tok);
-    }
-}
-
-// 带自动重试与临界自愈的领币逻辑（网络错误自动重试最多 3 次）
+// 领币核心逻辑（遇 401 自动重新登录换票，遇网络抖动重试 3 次，遇临界抖动秒级休眠补枪）
 function claimForAccountWithRetry(acc, token, callback, retryCount = 0, isJitterSelfHeal = false) {
     const claimUrl = `${SUPABASE_URL}/functions/v1/claim-daily-coins#force-timeout=15000`;
     const fakeIp = getRandomIP();
@@ -157,11 +123,17 @@ function claimForAccountWithRetry(acc, token, callback, retryCount = 0, isJitter
         response => {
             try {
                 const res = JSON.parse(response.body);
+                
+                // 1. 成功到账
                 if (res.success) {
                     const msg = `🎉 领币成功！+${res.coins_added} 币 (余额: ${res.balance})`;
                     console.log(`[EZCompleteUI] 账号【${acc.name}】${msg}`);
                     callback({ name: acc.name, success: true, text: msg });
-                } else if (res.next_claim_at) {
+                    return;
+                }
+                
+                // 2. 冷却中
+                if (res.next_claim_at) {
                     const nextTime = new Date(res.next_claim_at);
                     const now = new Date();
                     const diffSec = Math.floor((nextTime.getTime() - now.getTime()) / 1000);
@@ -180,22 +152,38 @@ function claimForAccountWithRetry(acc, token, callback, retryCount = 0, isJitter
                     const msg = `未到时间: 冷却至 ${timeStr}`;
                     console.log(`[EZCompleteUI] 账号【${acc.name}】${msg}`);
                     callback({ name: acc.name, success: false, text: msg });
-                } else {
-                    // 若收到非成功返回且未超限，尝试重试
+                    return;
+                }
+
+                // 3. Unauthorized 彻底自愈：Token 过期或失效，立即强制重新登录换票
+                if (res.error === "Unauthorized" || String(response.body).includes("Unauthorized")) {
                     if (retryCount < 2) {
-                        const delayMs = (retryCount + 1) * 2000;
-                        console.log(`[EZCompleteUI] 账号【${acc.name}】领币返回异常 (${response.body})，${delayMs/1000}s 后重试...`);
-                        setTimeout(() => claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal), delayMs);
-                    } else {
-                        const msg = `响应异常: ${response.body}`;
-                        console.log(`[EZCompleteUI] 账号【${acc.name}】${msg}`);
-                        callback({ name: acc.name, success: false, text: msg });
+                        console.log(`[EZCompleteUI 🔑Token自愈] 账号【${acc.name}】Token过期(Unauthorized)，立即强制重新换票...`);
+                        loginAccountWithRetry(acc, newToken => {
+                            if (newToken) {
+                                claimForAccountWithRetry(acc, newToken, callback, retryCount + 1, isJitterSelfHeal);
+                            } else {
+                                callback({ name: acc.name, success: false, text: "重新换票失败" });
+                            }
+                        });
+                        return;
                     }
+                }
+
+                // 4. 其他异常返回
+                if (retryCount < 2) {
+                    const delayMs = (retryCount + 1) * 2000;
+                    console.log(`[EZCompleteUI] 账号【${acc.name}】返回异常 (${response.body})，${delayMs/1000}s 后重试...`);
+                    setTimeout(() => claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal), delayMs);
+                } else {
+                    const msg = `响应异常: ${response.body}`;
+                    console.log(`[EZCompleteUI] 账号【${acc.name}】${msg}`);
+                    callback({ name: acc.name, success: false, text: msg });
                 }
             } catch (e) {
                 if (retryCount < 2) {
                     const delayMs = (retryCount + 1) * 2000;
-                    console.log(`[EZCompleteUI] 账号【${acc.name}】JSON解析失败 (${e.message})，${delayMs/1000}s 后重试...`);
+                    console.log(`[EZCompleteUI] 账号【${acc.name}】解析失败 (${e.message})，${delayMs/1000}s 后重试...`);
                     setTimeout(() => claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal), delayMs);
                 } else {
                     callback({ name: acc.name, success: false, text: `解析失败: ${e.message}` });
@@ -203,16 +191,12 @@ function claimForAccountWithRetry(acc, token, callback, retryCount = 0, isJitter
             }
         },
         err => {
-            // 核心防御点：网络错误自动重试 3 次！
             if (retryCount < 2) {
                 const delayMs = (retryCount + 1) * 2500;
-                console.log(`[EZCompleteUI 🛡️自愈防御] 账号【${acc.name}】领币遭遇网络错误 (${err})，第 ${retryCount + 1} 次拦截并于 ${delayMs/1000}s 后自动补发...`);
-                setTimeout(() => {
-                    claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal);
-                }, delayMs);
+                console.log(`[EZCompleteUI 🛡️自愈防御] 账号【${acc.name}】网络错误 (${err})，${delayMs/1000}s 后重发...`);
+                setTimeout(() => claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal), delayMs);
             } else {
-                console.log(`[EZCompleteUI] 账号【${acc.name}】连续 3 次网络错误，宣告本轮放弃: ${err}`);
-                callback({ name: acc.name, success: false, text: `网络错误 (已自动重试3次): ${err}` });
+                callback({ name: acc.name, success: false, text: `网络错误 (已重试3次): ${err}` });
             }
         }
     );
@@ -226,37 +210,18 @@ if (ACCOUNTS.length === 0) {
     console.log("[EZCompleteUI] 未在 QX 本地配置任何有效账号密码，跳过执行。");
     $done();
 } else {
-    // 强制时间对齐逻辑：小号1和小号2暂停凌晨4点的领取，全部整齐划一对齐到 08:00:00 之后！
-    const now = new Date();
-    const targetAlignTime = new Date();
-    targetAlignTime.setHours(8, 0, 0, 0); // 今天早晨 8点整
-
-    if (now < targetAlignTime) {
-        console.log("[EZCompleteUI 对齐控制] 检测到处于 08:00 之前，暂停【小号1】与【小号2】的临时领币，全矩阵对齐至 08:00 统一触发！");
-    }
-
     console.log(`[EZCompleteUI 矩阵调度器] 开始错峰并发调度 ${ACCOUNTS.length} 个账号...`);
     let completed = 0;
     const results = [];
 
-    // 工业级错峰队列：每个账号间隔 350ms 发送，彻底解决瞬间高并发导致的网络拥塞与丟包
     ACCOUNTS.forEach((acc, idx) => {
-        const staggerDelay = idx * 350;
+        const staggerDelay = idx * 400;
 
         setTimeout(() => {
-            // 如果是小号1或小号2且当前时间早于8点，跳过避让对齐
-            if (now < targetAlignTime && (acc.name === "小号1" || acc.name === "小号2")) {
-                const skipMsg = "⏸️ 动作暂停：避让 04:10 触发，等待 08:00 全矩阵统一步调对齐！";
-                console.log(`[EZCompleteUI] 账号【${acc.name}】${skipMsg}`);
-                results.push({ name: acc.name, success: false, text: skipMsg });
-                completed++;
-                if (completed === ACCOUNTS.length) finishAll(results);
-                return;
-            }
-
-            getValidToken(acc, token => {
+            // 每次直接强制重新换票，确保 100% 携带最新活 Token
+            loginAccountWithRetry(acc, token => {
                 if (!token) {
-                    results.push({ name: acc.name, success: false, text: "获取/刷新 Token 失败" });
+                    results.push({ name: acc.name, success: false, text: "登录换票失败" });
                     completed++;
                     if (completed === ACCOUNTS.length) finishAll(results);
                     return;
