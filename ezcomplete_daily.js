@@ -1,7 +1,7 @@
 /**
  * [task_local]
- * # 每 4 小时自动执行一次多账号领币
- * 10 0,4,8,12,16,20 * * * https://raw.githubusercontent.com/YueBtt/QuantumultX-Scripts/main/ezcomplete_daily.js, tag=EZCompleteUI多账号领币, img-url=https://raw.githubusercontent.com/crossutility/Quantumult-X/master/quantumult-x.png, enabled=true
+ * # 每 4 小时自动执行一次多账号领币（完美对齐 12:20 冷却结束，22分精准收割）
+ * 22 0,4,8,12,16,20 * * * https://raw.githubusercontent.com/YueBtt/QuantumultX-Scripts/main/ezcomplete_daily.js, tag=EZCompleteUI多账号领币, img-url=https://raw.githubusercontent.com/crossutility/Quantumult-X/master/quantumult-x.png, enabled=true
  */
 
 const SUPABASE_URL = "https://spuoimtqofhbdzosrbng.supabase.co";
@@ -61,7 +61,6 @@ function isTokenValid(token) {
         const json = JSON.parse(output);
         const exp = json.exp;
         const now = Math.floor(Date.now() / 1000);
-        // 如果离过期还有 5 分钟以上，就算有效
         return (exp - now) > 300;
     } catch (e) {
         return false;
