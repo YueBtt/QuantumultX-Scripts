@@ -7,6 +7,40 @@
 const SUPABASE_URL = "https://spuoimtqofhbdzosrbng.supabase.co";
 const ANON_KEY = "sb_publishable_AzEVhLuIj1nSMwZvIgKw7A__Y3Ghdtl";
 
+// 多国独立出口节点池（优先读 QX 本地 $prefs 的 ez_node_pool，未配置则使用内置跨国节点池）
+// 每个账号分配独立国家/机房节点，彻底解决同出口 IP 触发 ip_limit_reached 限流
+const DEFAULT_NODE_POOL = [
+    "🇦🇺 悉尼 | AWS 1.7G VLESS-Vision 零拷贝",
+    "🇺🇸 Instabox 4核8G美国纯血",
+    "🇭🇰香港 01 | 高级专线",
+    "🇯🇵日本 01 | 高级专线",
+    "🇸🇬Singapore 01",
+    "🇩🇪Germany 01",
+    "🇬🇧United Kingdom 01",
+    "🇰🇷Korea 01",
+    "🇳🇱Netherlands 01",
+    "🇹🇼Taiwan 03",
+    "🇲🇾Malaysia 01",
+    "🇺🇸United States 01",
+    "🇯🇵Japan 01",
+    "🇭🇰Hong Kong 03",
+    "🇺🇸美国 01 | 专线",
+    "🇨🇳台湾1",
+    "🇸🇬新加坡1",
+    "🇫🇷法国",
+    "🇮🇹意大利",
+    "🇹🇭泰国"
+];
+
+function getNodePool() {
+    const custom = getPref("ez_node_pool");
+    if (custom) {
+        const arr = custom.split(/[,，\n]/).map(s => s.trim()).filter(Boolean);
+        if (arr.length > 0) return arr;
+    }
+    return DEFAULT_NODE_POOL;
+}
+
 function getPref(key) {
     let val = $prefs.valueForKey(key);
     if (val === null || val === undefined) return "";
@@ -141,10 +175,12 @@ function getValidToken(acc, callback) {
     }
 }
 
-// 领币核心逻辑（适配 v7.2.14：支持 spins 奖励、ip_limit_reached 自动换 IP 重试、401 换票自愈、临界抖动补枪）
-function claimForAccountWithRetry(acc, token, callback, retryCount = 0, isJitterSelfHeal = false) {
+// 领币核心逻辑（适配 v7.2.14：支持多国节点 opts.policy 强隔离、spins 奖励、ip_limit_reached 换节点重试、401 换票自愈、临界抖动补枪）
+function claimForAccountWithRetry(acc, token, callback, retryCount = 0, isJitterSelfHeal = false, nodeIndex = 0) {
     const claimUrl = `${SUPABASE_URL}/functions/v1/claim-daily-coins`;
     const fakeIp = getRandomIP();
+    const pool = getNodePool();
+    const currentPolicy = pool.length > 0 ? pool[(nodeIndex + retryCount * 3) % pool.length] : null;
     const options = {
         url: claimUrl,
         method: "POST",
@@ -160,6 +196,9 @@ function claimForAccountWithRetry(acc, token, callback, retryCount = 0, isJitter
             spins_machines: ["classic", "penny", "plunder", "phoenix"]
         })
     };
+    if (currentPolicy) {
+        options.opts = { policy: currentPolicy };
+    }
 
     $task.fetch(options).then(
         response => {
@@ -176,21 +215,22 @@ function claimForAccountWithRetry(acc, token, callback, retryCount = 0, isJitter
                     }
                     const rewardStr = parts.length > 0 ? parts.join(" ") : `+${res.coins_added || 0} 币`;
                     const balStr = res.balance !== undefined ? ` (余额: ${res.balance})` : "";
+                    const nodeTag = currentPolicy ? ` [${currentPolicy}]` : "";
                     const msg = `🎉 领币成功！${rewardStr}${balStr}`;
-                    console.log(`[EZCompleteUI] 账号【${acc.name}】${msg}`);
+                    console.log(`[EZCompleteUI] 账号【${acc.name}】${msg}${nodeTag}`);
                     callback({ name: acc.name, success: true, text: msg });
                     return;
                 }
 
-                // 2. IP 限流（ip_limit_reached 也会携带 next_claim_at，必须优先拦截并重试，配合 QX round-robin 策略组自动切换真实出口 IP）
+                // 2. IP 限流（ip_limit_reached 也会携带 next_claim_at，必须优先拦截并切换不同国家节点重试）
                 if (res.error === "ip_limit_reached") {
                     if (retryCount < 5) {
-                        const delayMs = (retryCount + 1) * 1200;
-                        console.log(`[EZCompleteUI 🛡️IP限流自愈] 账号【${acc.name}】命中 ip_limit_reached，${delayMs/1000}s 后轮询新出口 IP 重试 (${retryCount + 1}/5)...`);
-                        setTimeout(() => claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal), delayMs);
+                        const delayMs = 1000;
+                        console.log(`[EZCompleteUI 🛡️IP限流自愈] 账号【${acc.name}】节点[${currentPolicy || "默认"}]命中 ip_limit_reached，${delayMs/1000}s 后切换新节点重试 (${retryCount + 1}/5)...`);
+                        setTimeout(() => claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal, nodeIndex), delayMs);
                         return;
                     } else {
-                        const msg = `IP限流(重试5次仍受限，请确认QX策略组已开启round-robin多节点轮询)`;
+                        const msg = `IP限流(已切5个节点仍受限)`;
                         console.log(`[EZCompleteUI] 账号【${acc.name}】${msg}`);
                         callback({ name: acc.name, success: false, text: msg });
                         return;
@@ -208,7 +248,7 @@ function claimForAccountWithRetry(acc, token, callback, retryCount = 0, isJitter
                         const waitMs = (diffSec + 3) * 1000;
                         console.log(`[EZCompleteUI] 账号【${acc.name}】临界抖动 (差 ${diffSec}s)，自动原地休眠 ${waitMs/1000}s 精准补枪！`);
                         setTimeout(() => {
-                            claimForAccountWithRetry(acc, token, callback, 0, true);
+                            claimForAccountWithRetry(acc, token, callback, 0, true, nodeIndex);
                         }, waitMs);
                         return;
                     }
@@ -220,14 +260,14 @@ function claimForAccountWithRetry(acc, token, callback, retryCount = 0, isJitter
                     return;
                 }
 
-                // 3. Unauthorized 彻底自愈：Token 过期或失效，清除缓存并重新登录换票
+                // 4. Unauthorized 彻底自愈：Token 过期或失效，清除缓存并重新登录换票
                 if (res.error === "Unauthorized" || String(response.body).includes("Unauthorized")) {
                     if (retryCount < 2) {
                         console.log(`[EZCompleteUI 🔑Token自愈] 账号【${acc.name}】Token过期(Unauthorized)，重新登录换票并补发...`);
                         $prefs.setValueForKey("", acc.key_token);
                         loginAccountWithRetry(acc, newToken => {
                             if (newToken) {
-                                claimForAccountWithRetry(acc, newToken, callback, retryCount + 1, isJitterSelfHeal);
+                                claimForAccountWithRetry(acc, newToken, callback, retryCount + 1, isJitterSelfHeal, nodeIndex);
                             } else {
                                 callback({ name: acc.name, success: false, text: "重新换票失败" });
                             }
@@ -236,11 +276,11 @@ function claimForAccountWithRetry(acc, token, callback, retryCount = 0, isJitter
                     }
                 }
 
-                // 4. 其他异常返回
+                // 5. 其他异常返回
                 if (retryCount < 2) {
                     const delayMs = (retryCount + 1) * 2000;
                     console.log(`[EZCompleteUI] 账号【${acc.name}】返回异常 (${response.body})，${delayMs/1000}s 后重试...`);
-                    setTimeout(() => claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal), delayMs);
+                    setTimeout(() => claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal, nodeIndex), delayMs);
                 } else {
                     const msg = `响应异常: ${response.body}`;
                     console.log(`[EZCompleteUI] 账号【${acc.name}】${msg}`);
@@ -250,7 +290,7 @@ function claimForAccountWithRetry(acc, token, callback, retryCount = 0, isJitter
                 if (retryCount < 2) {
                     const delayMs = (retryCount + 1) * 2000;
                     console.log(`[EZCompleteUI] 账号【${acc.name}】解析失败 (${e.message})，${delayMs/1000}s 后重试...`);
-                    setTimeout(() => claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal), delayMs);
+                    setTimeout(() => claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal, nodeIndex), delayMs);
                 } else {
                     callback({ name: acc.name, success: false, text: `解析失败: ${e.message}` });
                 }
@@ -258,12 +298,12 @@ function claimForAccountWithRetry(acc, token, callback, retryCount = 0, isJitter
         },
         err => {
             const errStr = typeof err === "object" ? JSON.stringify(err) : String(err);
-            if (retryCount < 2) {
-                const delayMs = (retryCount + 1) * 2500;
-                console.log(`[EZCompleteUI 🛡️自愈防御] 账号【${acc.name}】领币网络错误 (${errStr})，${delayMs/1000}s 后重发...`);
-                setTimeout(() => claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal), delayMs);
+            if (retryCount < 5) {
+                const delayMs = 1500;
+                console.log(`[EZCompleteUI 🛡️节点容灾] 账号【${acc.name}】节点[${currentPolicy || "默认"}]网络错误 (${errStr})，${delayMs/1000}s 后换新节点重发 (${retryCount + 1}/5)...`);
+                setTimeout(() => claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal, nodeIndex), delayMs);
             } else {
-                callback({ name: acc.name, success: false, text: `网络错误 (已重试3次): ${errStr}` });
+                callback({ name: acc.name, success: false, text: `网络错误 (已换5节点): ${errStr}` });
             }
         }
     );
