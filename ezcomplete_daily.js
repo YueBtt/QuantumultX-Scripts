@@ -141,7 +141,7 @@ function getValidToken(acc, callback) {
     }
 }
 
-// 领币核心逻辑（遇 401 自动重新换票，遇网络抖动重试 3 次，遇临界抖动秒级休眠补枪）
+// 领币核心逻辑（适配 v7.2.14：支持 spins 奖励、ip_limit_reached 自动换 IP 重试、401 换票自愈、临界抖动补枪）
 function claimForAccountWithRetry(acc, token, callback, retryCount = 0, isJitterSelfHeal = false) {
     const claimUrl = `${SUPABASE_URL}/functions/v1/claim-daily-coins`;
     const fakeIp = getRandomIP();
@@ -156,23 +156,48 @@ function claimForAccountWithRetry(acc, token, callback, retryCount = 0, isJitter
             "Client-IP": fakeIp,
             "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"
         },
-        body: "{}"
+        body: JSON.stringify({
+            spins_machines: ["classic", "penny", "plunder", "phoenix"]
+        })
     };
 
     $task.fetch(options).then(
         response => {
             try {
                 const res = JSON.parse(response.body);
-                
-                // 1. 成功到账
+
+                // 1. 成功到账（兼容金币 + 免费旋转双奖励）
                 if (res.success) {
-                    const msg = `🎉 领币成功！+${res.coins_added} 币 (余额: ${res.balance})`;
+                    const parts = [];
+                    if (res.coins_added) parts.push(`+${res.coins_added} 币`);
+                    if (res.spins_added) {
+                        const machine = res.spins_machine ? `(${res.spins_machine})` : "";
+                        parts.push(`+${res.spins_added} 旋转${machine}`);
+                    }
+                    const rewardStr = parts.length > 0 ? parts.join(" ") : `+${res.coins_added || 0} 币`;
+                    const balStr = res.balance !== undefined ? ` (余额: ${res.balance})` : "";
+                    const msg = `🎉 领币成功！${rewardStr}${balStr}`;
                     console.log(`[EZCompleteUI] 账号【${acc.name}】${msg}`);
                     callback({ name: acc.name, success: true, text: msg });
                     return;
                 }
-                
-                // 2. 冷却中
+
+                // 2. IP 限流（ip_limit_reached 也会携带 next_claim_at，必须优先拦截并换随机 IP 重试）
+                if (res.error === "ip_limit_reached") {
+                    if (retryCount < 3) {
+                        const delayMs = (retryCount + 1) * 1500;
+                        console.log(`[EZCompleteUI 🛡️IP限流自愈] 账号【${acc.name}】命中 ip_limit_reached，${delayMs/1000}s 后更换随机 IP 重试 (${retryCount + 1}/3)...`);
+                        setTimeout(() => claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal), delayMs);
+                        return;
+                    } else {
+                        const msg = `IP限流(重试3次仍受限)`;
+                        console.log(`[EZCompleteUI] 账号【${acc.name}】${msg}`);
+                        callback({ name: acc.name, success: false, text: msg });
+                        return;
+                    }
+                }
+
+                // 3. 冷却中（too_soon 或携带 next_claim_at）
                 if (res.next_claim_at) {
                     const nextTime = new Date(res.next_claim_at);
                     const now = new Date();
