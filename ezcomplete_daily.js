@@ -182,15 +182,15 @@ function claimForAccountWithRetry(acc, token, callback, retryCount = 0, isJitter
                     return;
                 }
 
-                // 2. IP 限流（ip_limit_reached 也会携带 next_claim_at，必须优先拦截并换随机 IP 重试）
+                // 2. IP 限流（ip_limit_reached 也会携带 next_claim_at，必须优先拦截并重试，配合 QX round-robin 策略组自动切换真实出口 IP）
                 if (res.error === "ip_limit_reached") {
-                    if (retryCount < 3) {
-                        const delayMs = (retryCount + 1) * 1500;
-                        console.log(`[EZCompleteUI 🛡️IP限流自愈] 账号【${acc.name}】命中 ip_limit_reached，${delayMs/1000}s 后更换随机 IP 重试 (${retryCount + 1}/3)...`);
+                    if (retryCount < 5) {
+                        const delayMs = (retryCount + 1) * 1200;
+                        console.log(`[EZCompleteUI 🛡️IP限流自愈] 账号【${acc.name}】命中 ip_limit_reached，${delayMs/1000}s 后轮询新出口 IP 重试 (${retryCount + 1}/5)...`);
                         setTimeout(() => claimForAccountWithRetry(acc, token, callback, retryCount + 1, isJitterSelfHeal), delayMs);
                         return;
                     } else {
-                        const msg = `IP限流(重试3次仍受限)`;
+                        const msg = `IP限流(重试5次仍受限，请确认QX策略组已开启round-robin多节点轮询)`;
                         console.log(`[EZCompleteUI] 账号【${acc.name}】${msg}`);
                         callback({ name: acc.name, success: false, text: msg });
                         return;
