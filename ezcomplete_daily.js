@@ -337,7 +337,7 @@ if (ACCOUNTS.length === 0) {
                     results.push(res);
                     completed++;
                     if (completed === ACCOUNTS.length) finishAll(results);
-                });
+                }, 0, false, idx);
             });
         }, staggerDelay);
     });
